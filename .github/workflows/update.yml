@@ -1,0 +1,44 @@
+name: Update Taiwan Sector Rotation Data
+
+on:
+  schedule:
+    - cron: "30 6 * * 1-5"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install pandas requests
+
+      - name: Compute date range (last 90 days)
+        id: daterange
+        run: |
+          echo "start=$(date -d '90 days ago' +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+          echo "end=$(date +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Build full-market mapping (fine override + official industries)
+        run: python3 xq_group_rrg.py full-market --fine-override xq_groups.csv --out xq_groups_full.csv
+
+      - name: Compute RRG data
+        run: python3 xq_group_rrg.py constituents --mapping xq_groups_full.csv --start ${{ steps.daterange.outputs.start }} --end ${{ steps.daterange.outputs.end }} --json-out xq_group_rrg.json
+
+      - name: Commit and push updated data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add xq_group_rrg.json xq_groups_full.csv
+          git diff --quiet --cached || git commit -m "自動更新產業輪動資料 $(date +%Y-%m-%d)"
+          git push
