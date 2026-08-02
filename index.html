@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<title>產業輪動圖 RRG</title>
+<style>
+  :root{
+    --bg:#0a0e16;
+    --panel:#0f1420;
+    --grid:#1c2436;
+    --axis:#2a3350;
+    --text:#c9d3e6;
+    --text-dim:#5c6788;
+    --improving:#38d9e8;   /* cyan  - top-left */
+    --leading:#ff4d7e;     /* pink/red - top-right */
+    --lagging:#9d7bff;     /* purple - bottom-left */
+    --weakening:#ff9f40;   /* orange - bottom-right */
+    --accent:#ffce45;
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    margin:0; padding:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,"PingFang TC","Microsoft JhengHei",Segoe UI,sans-serif;
+    height:100%;
+  }
+  #app{ display:flex; flex-direction:column; height:100%; min-height:640px; }
+  header{
+    padding:14px 18px 10px; display:flex; align-items:center; justify-content:space-between;
+    flex-wrap:wrap; gap:10px; border-bottom:1px solid var(--grid);
+  }
+  header h1{ font-size:16px; margin:0; font-weight:600; letter-spacing:.5px; color:#eef2fb;}
+  header h1 span{ color:var(--text-dim); font-weight:400; font-size:12px; margin-left:8px;}
+  .controls{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  button, .file-btn{
+    background:#151b2b; color:var(--text); border:1px solid var(--grid);
+    border-radius:6px; padding:6px 12px; font-size:12px; cursor:pointer;
+    transition:.15s; white-space:nowrap;
+  }
+  button:hover, .file-btn:hover{ border-color:var(--accent); color:#fff; }
+  button.active{ background:var(--accent); color:#1a1200; border-color:var(--accent); font-weight:600;}
+  input[type=file]{ display:none; }
+  input[type=range]{ width:140px; accent-color: var(--accent); }
+  .datebox{ font-size:12px; color:var(--text-dim); min-width:78px; text-align:center;}
+  main{ flex:1; position:relative; padding:8px 14px 14px; }
+  svg{ width:100%; height:100%; display:block; }
+  .quadrant-label{ font-size:13px; font-weight:700; letter-spacing:1px; }
+  .quadrant-label .en{ fill:currentColor; opacity:.9;}
+  .quadrant-label .zh{ fill:currentColor; opacity:.55; font-weight:400;}
+  .quadrant-num{ font-weight:800; opacity:.07; }
+  .grid-line{ stroke:var(--grid); stroke-width:1; }
+  .axis-line{ stroke:var(--axis); stroke-width:1; stroke-dasharray:3 3; }
+  .trail{ fill:none; stroke-linecap:round; stroke-linejoin:round; }
+  .node-label{ font-size:10.5px; fill:var(--text); paint-order:stroke; stroke:#0a0e16; stroke-width:3px; }
+  .node-label.hot{ font-weight:700; }
+  .dot-outline{ fill:none; stroke:#0a0e16; stroke-width:1.5px; }
+  .rrg-dot, .rrg-dot-outline, .rrg-trail{ transition: cx .35s cubic-bezier(.4,0,.2,1), cy .35s cubic-bezier(.4,0,.2,1), d .35s cubic-bezier(.4,0,.2,1), opacity .35s; }
+  .empty-state{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    flex-direction:column; gap:14px; color:var(--text-dim); text-align:center; padding:20px;
+  }
+  .empty-state b{ color:var(--text); font-size:14px; }
+  #rankTable{ width:100%; border-collapse:collapse; font-size:13px; }
+  #rankTable thead th{
+    position:sticky; top:0; background:var(--panel); text-align:left; padding:8px 10px;
+    color:var(--text-dim); font-weight:600; cursor:pointer; border-bottom:1px solid var(--grid); white-space:nowrap;
+  }
+  #rankTable thead th:hover{ color:var(--accent); }
+  #rankTable tbody td{ padding:7px 10px; border-bottom:1px solid var(--grid); }
+  #rankTable tbody tr:hover{ background:#131a2a; }
+  .quad-pill{ display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:700; }
+  .num{ font-variant-numeric:tabular-nums; }
+  .pos{ color:#ff6b8a; } .neg{ color:#5fd0e8; }
+  .const-btn{
+    background:#151b2b; color:var(--text-dim); border:1px solid var(--grid); border-radius:5px;
+    padding:3px 9px; font-size:11px; cursor:pointer;
+  }
+  .const-btn:hover{ color:var(--accent); border-color:var(--accent); }
+  .btn-group{ display:inline-flex; gap:4px; }
+  .btn-group button{
+    background:#151b2b; color:var(--text-dim); border:1px solid var(--grid); border-radius:5px;
+    padding:5px 10px; font-size:11px; cursor:pointer;
+  }
+  .btn-group button.active{ background:var(--accent); color:#1a1200; border-color:var(--accent); font-weight:600; }
+  .modal-overlay{
+    position:fixed; inset:0; background:rgba(0,0,0,.6); display:flex; align-items:center; justify-content:center; z-index:50;
+  }
+  .modal-box{
+    background:var(--panel); border:1px solid var(--grid); border-radius:10px; width:min(560px,90vw); max-height:70vh;
+    display:flex; flex-direction:column; overflow:hidden;
+  }
+  .modal-head{
+    display:flex; justify-content:space-between; align-items:center; padding:14px 16px; border-bottom:1px solid var(--grid);
+    font-size:15px; font-weight:700; color:#eef2fb;
+  }
+  .modal-head button{ background:none; border:none; color:var(--text-dim); font-size:16px; cursor:pointer; }
+  .modal-body{ padding:14px 16px; overflow:auto; display:grid; grid-template-columns:repeat(3,1fr); gap:8px 14px; font-size:13px; }
+  .modal-body span.code{ color:var(--text-dim); margin-right:6px; }
+  footer{
+    padding:8px 18px 12px; font-size:11px; color:var(--text-dim); border-top:1px solid var(--grid);
+    display:flex; justify-content:space-between; flex-wrap:wrap; gap:6px;
+  }
+  .legend{ display:flex; gap:14px; flex-wrap:wrap; }
+  .legend span{ display:inline-flex; align-items:center; gap:5px; }
+  .legend i{ width:9px; height:9px; border-radius:50%; display:inline-block; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>產業輪動圖 <span id="subtitle">Relative Rotation Graph（尚未載入資料）</span></h1>
+    <div class="controls">
+      <label class="file-btn">📂 上傳 JSON<input id="fileInput" type="file" accept=".json,application/json"></label>
+      <button id="demoBtn">🎲 範例資料</button>
+      <button id="playBtn">▶ 播放</button>
+      <button id="resetBtn">⟲ Reset</button>
+      <button class="speed" data-speed="0.5">0.5x</button>
+      <button class="speed active" data-speed="1">1x</button>
+      <button class="speed" data-speed="2">2x</button>
+      <button class="speed" data-speed="4">4x</button>
+      <input id="scrubber" type="range" min="0" max="0" value="0">
+      <span class="datebox" id="dateBox">--/--</span>
+      <button id="viewToggleBtn" class="active">📈 散點圖</button>
+    </div>
+    <div class="controls" id="variantControls" style="display:none;">
+      <span class="datebox">基準</span>
+      <div id="benchmarkBtns" class="btn-group"></div>
+      <span class="datebox">週期</span>
+      <div id="periodBtns" class="btn-group"></div>
+      <span class="datebox">尾巴長度</span>
+      <input id="tailSlider" type="range" min="3" max="20" value="8">
+      <span class="datebox" id="tailValue">8日</span>
+    </div>
+  </header>
+  <main>
+    <svg id="chart" viewBox="0 0 1000 700" preserveAspectRatio="xMidYMid meet"></svg>
+    <div id="tableView" style="display:none; height:100%; overflow:auto;">
+      <table id="rankTable">
+        <thead>
+          <tr>
+            <th data-key="name">產業</th>
+            <th data-key="quad">象限</th>
+            <th data-key="ratio">RS-Ratio ▼</th>
+            <th data-key="momentum">動能</th>
+            <th data-key="dist">距中心</th>
+            <th data-key="delta">近期ΔR</th>
+            <th data-key="signal">訊號</th>
+            <th>成份</th>
+          </tr>
+        </thead>
+        <tbody id="rankTableBody"></tbody>
+      </table>
+    </div>
+    <div class="empty-state" id="emptyState">
+      <b>還沒有資料可以畫</b>
+      <div>用 twse_sector_rrg.py 產生 twse_sector_rrg.json 後按「上傳 JSON」，<br>或先按「範例資料」看看互動效果。</div>
+    </div>
+    <div id="constituentModal" class="modal-overlay" style="display:none;">
+      <div class="modal-box">
+        <div class="modal-head">
+          <span id="modalTitle"></span>
+          <button id="modalClose">✕</button>
+        </div>
+        <div id="modalBody" class="modal-body"></div>
+      </div>
+    </div>
+  </main>
+  <footer>
+    <div class="legend">
+      <span><i style="background:var(--improving)"></i>改善 Improving</span>
+      <span><i style="background:var(--leading)"></i>領先 Leading</span>
+      <span><i style="background:var(--weakening)"></i>轉弱 Weakening</span>
+      <span><i style="background:var(--lagging)"></i>落後 Lagging</span>
+    </div>
+    <div>橫軸 RS-Ratio（相對強度）・縱軸 RS-Momentum（動能）・軌跡為近 8 個交易日路徑</div>
+  </footer>
+</div>
+
+<script>
+const NS = "http://www.w3.org/2000/svg";
+const svg = document.getElementById('chart');
+const scrubber = document.getElementById('scrubber');
+const dateBox = document.getElementById('dateBox');
+const subtitle = document.getElementById('subtitle');
+const emptyState = document.getElementById('emptyState');
+const playBtn = document.getElementById('playBtn');
+
+let dataset = null;      // {dates:[...], sectors:{name:[{date,ratio,momentum}...]}}
+let sectorSeries = {};   // name -> Map(date -> {ratio,momentum})
+let dateIndex = 0;
+let playing = false;
+let speed = 1;
+let timer = null;
+let TRAIL_LEN = 8;
+let rawVariants = null, benchmarkLabels = {}, periodLabels = {}, curBenchmark = null, curPeriod = null;
+
+// ---------- coordinate mapping ----------
+const PAD = 70;
+const W = 1000, H = 700;
+let domain = {minR:96, maxR:106, minM:96, maxM:106};
+
+function computeDomain(){
+  let minR=Infinity,maxR=-Infinity,minM=Infinity,maxM=-Infinity;
+  Object.values(sectorSeries).forEach(map=>{
+    map.forEach(p=>{
+      if(p.ratio<minR)minR=p.ratio; if(p.ratio>maxR)maxR=p.ratio;
+      if(p.momentum<minM)minM=p.momentum; if(p.momentum>maxM)maxM=p.momentum;
+    });
+  });
+  if(!isFinite(minR)){ domain={minR:96,maxR:106,minM:96,maxM:106}; return; }
+  const padR=(maxR-minR)*0.15||1, padM=(maxM-minM)*0.15||1;
+  domain = {minR:minR-padR, maxR:maxR+padR, minM:minM-padM, maxM:maxM+padM};
+  // keep 100/100 roughly centered-ish but not forced
+}
+function X(r){ return PAD + (r-domain.minR)/(domain.maxR-domain.minR) * (W-2*PAD); }
+function Y(m){ return H-PAD - (m-domain.minM)/(domain.maxM-domain.minM) * (H-2*PAD); }
+function X100(){ return X(100); }
+function Y100(){ return Y(100); }
+
+function quadrantOf(ratio, momentum){
+  if(ratio>=100 && momentum>=100) return 'leading';
+  if(ratio<100 && momentum>=100) return 'improving';
+  if(ratio<100 && momentum<100) return 'lagging';
+  return 'weakening';
+}
+const COLORS = {
+  improving:'#38d9e8', leading:'#ff4d7e', lagging:'#9d7bff', weakening:'#ff9f40'
+};
+
+// ---------- rendering ----------
+function el(tag, attrs){
+  const e = document.createElementNS(NS, tag);
+  for(const k in attrs) e.setAttribute(k, attrs[k]);
+  return e;
+}
+
+let staticG = null, dotsG = null, dotCache = {};
+
+function ensureLayers(){
+  if(staticG && dotsG && svg.contains(staticG)) return;
+  svg.innerHTML = '';
+  staticG = el('g', {id:'staticLayer'});
+  dotsG = el('g', {id:'dotsLayer'});
+  svg.appendChild(staticG);
+  svg.appendChild(dotsG);
+  dotCache = {};
+}
+
+function render(){
+  if(!dataset){ emptyState.style.display='flex'; if(svg) svg.innerHTML=''; staticG=dotsG=null; return; }
+  emptyState.style.display='none';
+  ensureLayers();
+
+  // ---- static background (grid/axes/quadrant labels/date) — cheap to fully rebuild, no motion needed ----
+  staticG.innerHTML = '';
+  for(let gx = Math.ceil(domain.minR); gx <= Math.floor(domain.maxR); gx++){
+    staticG.appendChild(el('line',{x1:X(gx),y1:PAD-10,x2:X(gx),y2:H-PAD+10,class:'grid-line'}));
+  }
+  for(let gy = Math.ceil(domain.minM); gy <= Math.floor(domain.maxM); gy++){
+    staticG.appendChild(el('line',{x1:PAD-10,y1:Y(gy),x2:W-PAD+10,y2:Y(gy),class:'grid-line'}));
+  }
+  staticG.appendChild(el('line',{x1:X100(),y1:PAD-10,x2:X100(),y2:H-PAD+10,class:'axis-line'}));
+  staticG.appendChild(el('line',{x1:PAD-10,y1:Y100(),x2:W-PAD+10,y2:Y100(),class:'axis-line'}));
+
+  const qnum = [
+    {x:(PAD+X100())/2, y:(PAD+Y100())/2, t:'2', color:COLORS.improving},
+    {x:(X100()+W-PAD)/2, y:(PAD+Y100())/2, t:'1', color:COLORS.leading},
+    {x:(PAD+X100())/2, y:(Y100()+H-PAD)/2, t:'3', color:COLORS.lagging},
+    {x:(X100()+W-PAD)/2, y:(Y100()+H-PAD)/2, t:'4', color:COLORS.weakening},
+  ];
+  qnum.forEach(q=>{
+    const t = el('text',{x:q.x,y:q.y,'text-anchor':'middle','dominant-baseline':'middle',
+      class:'quadrant-num', style:`font-size:120px; fill:${q.color}`});
+    t.textContent = q.t;
+    staticG.appendChild(t);
+  });
+
+  function qlabel(x,y,anchor,en,zh,color){
+    const t1 = el('text',{x,y,'text-anchor':anchor, class:'quadrant-label', style:`fill:${color}`});
+    t1.textContent = en + '  ' + zh;
+    staticG.appendChild(t1);
+  }
+  qlabel(PAD, 26, 'start', 'IMPROVING', '改善', COLORS.improving);
+  qlabel(W-PAD, 26, 'end', 'LEADING', '領先', COLORS.leading);
+  qlabel(PAD, H-16, 'start', 'LAGGING', '落後', COLORS.lagging);
+  qlabel(W-PAD, H-16, 'end', 'WEAKENING', '轉弱', COLORS.weakening);
+
+  const curDate = dataset.dates[dateIndex] || '';
+  const dt = el('text',{x:W/2, y:36, 'text-anchor':'middle', style:'font-size:22px;font-weight:700;fill:#eef2fb'});
+  dt.textContent = curDate;
+  staticG.appendChild(dt);
+
+  // ---- sectors: reuse persistent DOM nodes per sector so cx/cy/d transitions animate smoothly ----
+  const names = Object.keys(sectorSeries);
+  const seen = new Set();
+  names.forEach(name=>{
+    const series = sectorSeries[name];
+    const pts = [];
+    for(let i=Math.max(0, dateIndex-TRAIL_LEN+1); i<=dateIndex; i++){
+      const d = dataset.dates[i];
+      if(series.has(d)) pts.push({d, ...series.get(d)});
+    }
+    if(pts.length===0) return;
+    seen.add(name);
+    const last = pts[pts.length-1];
+    const quad = quadrantOf(last.ratio, last.momentum);
+    const color = COLORS[quad];
+    const cx = X(last.ratio), cy = Y(last.momentum);
+
+    let entry = dotCache[name];
+    if(!entry){
+      entry = {
+        trail: el('path',{class:'rrg-trail trail','stroke-width':2}),
+        outline: el('circle',{r:7.5, class:'dot-outline rrg-dot-outline'}),
+        circle: el('circle',{r:6, class:'rrg-dot'}),
+        label: el('text',{class:'node-label'}),
+      };
+      dotsG.appendChild(entry.trail);
+      dotsG.appendChild(entry.outline);
+      dotsG.appendChild(entry.circle);
+      dotsG.appendChild(entry.label);
+      dotCache[name] = entry;
+    }
+
+    let pathD = '';
+    if(pts.length>1){
+      pts.forEach((p,i)=>{
+        const x=X(p.ratio), y=Y(p.momentum);
+        pathD += (i===0? 'M':'L') + x.toFixed(1) + ',' + y.toFixed(1) + ' ';
+      });
+    }
+    entry.trail.setAttribute('d', pathD.trim());
+    entry.trail.setAttribute('stroke', color);
+    entry.trail.setAttribute('opacity', pts.length>1 ? 0.55 : 0);
+    entry.outline.setAttribute('cx', cx); entry.outline.setAttribute('cy', cy);
+    entry.circle.setAttribute('cx', cx); entry.circle.setAttribute('cy', cy);
+    entry.circle.setAttribute('fill', color);
+    entry.label.setAttribute('x', cx+9); entry.label.setAttribute('y', cy+4);
+    entry.label.textContent = name;
+    entry.trail.style.display = entry.outline.style.display = entry.circle.style.display = entry.label.style.display = '';
+  });
+  // hide sectors that have no data at this date instead of destroying (keeps identity if they reappear)
+  Object.keys(dotCache).forEach(name=>{
+    if(!seen.has(name)){
+      const e = dotCache[name];
+      e.trail.style.display = e.outline.style.display = e.circle.style.display = e.label.style.display = 'none';
+    }
+  });
+
+  scrubber.value = dateIndex;
+  dateBox.textContent = curDate;
+}
+
+// ---------- data loading ----------
+function loadFlatVariant(json){
+  dataset = json;
+  sectorSeries = {};
+  Object.entries(json.sectors).forEach(([name, points])=>{
+    const map = new Map();
+    points.forEach(p=> map.set(p.date, {ratio:p.ratio, momentum:p.momentum}));
+    sectorSeries[name] = map;
+  });
+  computeDomain();
+  scrubber.max = json.dates.length - 1;
+  dateIndex = Math.min(dateIndex, json.dates.length - 1);
+  if(dateIndex < 0) dateIndex = 0;
+  const bLabel = benchmarkLabels[curBenchmark] ? `・基準:${benchmarkLabels[curBenchmark]}` : '';
+  const pLabel = periodLabels[curPeriod] ? `・週期:${periodLabels[curPeriod]}` : '';
+  subtitle.textContent = `${json.dates[0]} ~ ${json.dates[json.dates.length-1]} ・ ${Object.keys(sectorSeries).length} 個產業${bLabel}${pLabel}`;
+  render();
+}
+
+function renderVariantControls(){
+  const wrap = document.getElementById('variantControls');
+  const bWrap = document.getElementById('benchmarkBtns');
+  const pWrap = document.getElementById('periodBtns');
+  if(!rawVariants){ wrap.style.display = 'none'; return; }
+  wrap.style.display = 'flex';
+  bWrap.innerHTML = '';
+  Object.keys(benchmarkLabels).forEach(key=>{
+    const b = document.createElement('button');
+    b.textContent = benchmarkLabels[key];
+    if(key===curBenchmark) b.classList.add('active');
+    b.addEventListener('click', ()=>{
+      curBenchmark = key;
+      renderVariantControls();
+      loadFlatVariant(rawVariants[curBenchmark][curPeriod]);
+    });
+    bWrap.appendChild(b);
+  });
+  pWrap.innerHTML = '';
+  Object.keys(periodLabels).forEach(key=>{
+    const b = document.createElement('button');
+    b.textContent = periodLabels[key];
+    if(key===curPeriod) b.classList.add('active');
+    b.addEventListener('click', ()=>{
+      curPeriod = key;
+      renderVariantControls();
+      loadFlatVariant(rawVariants[curBenchmark][curPeriod]);
+    });
+    pWrap.appendChild(b);
+  });
+}
+
+function loadDataset(json){
+  if(json.variants){
+    rawVariants = json.variants;
+    benchmarkLabels = json.benchmarks || {};
+    periodLabels = json.periods || {};
+    curBenchmark = json.default_benchmark || Object.keys(benchmarkLabels)[0];
+    curPeriod = json.default_period || Object.keys(periodLabels)[0];
+    dateIndex = 0;
+    renderVariantControls();
+    loadFlatVariant(rawVariants[curBenchmark][curPeriod]);
+  } else {
+    // 舊版單組資料格式，相容處理
+    rawVariants = null;
+    document.getElementById('variantControls').style.display = 'none';
+    dateIndex = 0;
+    loadFlatVariant(json);
+  }
+}
+
+document.getElementById('tailSlider').addEventListener('input', (e)=>{
+  TRAIL_LEN = parseInt(e.target.value, 10);
+  document.getElementById('tailValue').textContent = TRAIL_LEN + '日';
+  render();
+});
+
+document.getElementById('fileInput').addEventListener('change', (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    try{
+      const json = JSON.parse(reader.result);
+      loadDataset(json);
+    }catch(err){
+      alert('JSON 解析失敗: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+});
+
+document.getElementById('demoBtn').addEventListener('click', ()=>{
+  loadDataset(generateDemoData());
+});
+
+// ---------- playback ----------
+function stopPlay(){
+  playing = false; playBtn.textContent = '▶ 播放';
+  if(timer){ clearInterval(timer); timer=null; }
+}
+function startPlay(){
+  if(!dataset) return;
+  playing = true; playBtn.textContent = '⏸ 暫停';
+  timer = setInterval(()=>{
+    dateIndex++;
+    if(dateIndex >= dataset.dates.length){ dateIndex = dataset.dates.length-1; stopPlay(); }
+    render();
+  }, 500/speed);
+}
+playBtn.addEventListener('click', ()=>{
+  if(!dataset) return;
+  playing ? stopPlay() : startPlay();
+});
+document.getElementById('resetBtn').addEventListener('click', ()=>{
+  stopPlay(); dateIndex = 0; render();
+});
+document.querySelectorAll('.speed').forEach(b=>{
+  b.addEventListener('click', ()=>{
+    document.querySelectorAll('.speed').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');
+    speed = parseFloat(b.dataset.speed);
+    if(playing){ stopPlay(); startPlay(); }
+  });
+});
+scrubber.addEventListener('input', ()=>{
+  stopPlay();
+  dateIndex = parseInt(scrubber.value, 10);
+  render();
+});
+
+// ---------- demo data generator ----------
+function generateDemoData(){
+  const sectors = ['半導體','金融保險','生技醫療','油電燃氣','電子零組件','航運','塑膠','鋼鐵','光電','通信網路'];
+  const days = 40;
+  const dates = [];
+  const base = new Date('2026-05-01');
+  for(let i=0;i<days;i++){
+    const d = new Date(base); d.setDate(base.getDate()+i);
+    if(d.getDay()===0 || d.getDay()===6) continue;
+    dates.push(d.toISOString().slice(0,10));
+  }
+  const sectorsOut = {};
+  sectors.forEach((name, si)=>{
+    let ratio = 96 + Math.random()*8;
+    let momentum = 96 + Math.random()*8;
+    const angle0 = Math.random()*Math.PI*2;
+    const pts = [];
+    dates.forEach((d,i)=>{
+      const angle = angle0 + i*0.18 + si;
+      ratio = 101 + 3.2*Math.cos(angle) + (Math.random()-0.5)*0.4;
+      momentum = 101 + 3.2*Math.sin(angle) + (Math.random()-0.5)*0.4;
+      pts.push({date:d, ratio:+ratio.toFixed(2), momentum:+momentum.toFixed(2)});
+    });
+    sectorsOut[name] = pts;
+  });
+  return {dates, sectors: sectorsOut};
+}
+
+// ---------- table view ----------
+let viewMode = 'scatter'; // 'scatter' | 'table'
+let sortKey = 'ratio', sortDesc = true;
+const QUAD_LABEL = {
+  leading:{n:'第1',t:'領先',c:COLORS.leading},
+  improving:{n:'第2',t:'改善',c:COLORS.improving},
+  lagging:{n:'第3',t:'落後',c:COLORS.lagging},
+  weakening:{n:'第4',t:'轉弱',c:COLORS.weakening},
+};
+
+function buildTableRows(){
+  if(!dataset) return [];
+  const curDate = dataset.dates[dateIndex];
+  const rows = [];
+  Object.keys(sectorSeries).forEach(name=>{
+    const series = sectorSeries[name];
+    const cur = series.get(curDate);
+    if(!cur) return;
+    const priorIdx = Math.max(0, dateIndex-5);
+    const priorDate = dataset.dates[priorIdx];
+    const prior = series.get(priorDate);
+    const delta = prior ? cur.ratio - prior.ratio : 0;
+    const quad = quadrantOf(cur.ratio, cur.momentum);
+    const priorQuad = prior ? quadrantOf(prior.ratio, prior.momentum) : quad;
+    const dist = Math.sqrt(Math.pow(cur.ratio-100,2)+Math.pow(cur.momentum-100,2));
+    rows.push({name, ratio:cur.ratio, momentum:cur.momentum, dist, delta, quad, rotated: quad!==priorQuad});
+  });
+  return rows;
+}
+
+function renderTable(){
+  const tbody = document.getElementById('rankTableBody');
+  if(!dataset){ tbody.innerHTML=''; return; }
+  let rows = buildTableRows();
+  rows.sort((a,b)=>{
+    const va=a[sortKey], vb=b[sortKey];
+    if(typeof va==='string') return sortDesc ? vb.localeCompare(va) : va.localeCompare(vb);
+    return sortDesc ? vb-va : va-vb;
+  });
+  tbody.innerHTML = rows.map(r=>{
+    const q = QUAD_LABEL[r.quad];
+    const deltaCls = r.delta>=0?'pos':'neg';
+    const deltaSign = r.delta>=0?'+':'';
+    return `<tr>
+      <td>${r.name}</td>
+      <td><span class="quad-pill" style="background:${q.c}22;color:${q.c}">${q.n} ${q.t}</span></td>
+      <td class="num">${r.ratio.toFixed(2)}</td>
+      <td class="num">${r.momentum.toFixed(2)}</td>
+      <td class="num">${r.dist.toFixed(2)}</td>
+      <td class="num ${deltaCls}">${deltaSign}${r.delta.toFixed(2)}</td>
+      <td>${r.rotated ? '⭐' : '-'}</td>
+      <td><button class="const-btn" data-name="${r.name}">成份</button></td>
+    </tr>`;
+  }).join('');
+  tbody.querySelectorAll('.const-btn').forEach(btn=>{
+    btn.addEventListener('click', ()=> openConstituentModal(btn.dataset.name));
+  });
+}
+
+function openConstituentModal(name){
+  const modal = document.getElementById('constituentModal');
+  const list = (dataset.constituents && dataset.constituents[name]) || null;
+  document.getElementById('modalTitle').textContent = name;
+  const body = document.getElementById('modalBody');
+  if(list && list.length){
+    body.innerHTML = list.map(s=>`<div>${s}</div>`).join('');
+  } else {
+    body.innerHTML = `<div style="grid-column:1/-1;color:var(--text-dim)">這份資料沒有附成分股清單（用 twse_sector_rrg.py 的 constituents 模式產生 JSON 才會有）。</div>`;
+  }
+  modal.style.display = 'flex';
+}
+document.getElementById('modalClose').addEventListener('click', ()=>{
+  document.getElementById('constituentModal').style.display='none';
+});
+document.getElementById('constituentModal').addEventListener('click', (e)=>{
+  if(e.target.id==='constituentModal') e.currentTarget.style.display='none';
+});
+
+document.querySelectorAll('#rankTable thead th[data-key]').forEach(th=>{
+  th.addEventListener('click', ()=>{
+    const key = th.dataset.key;
+    if(sortKey===key) sortDesc=!sortDesc; else { sortKey=key; sortDesc=true; }
+    renderTable();
+  });
+});
+
+document.getElementById('viewToggleBtn').addEventListener('click', ()=>{
+  viewMode = viewMode==='scatter' ? 'table' : 'scatter';
+  const btn = document.getElementById('viewToggleBtn');
+  btn.textContent = viewMode==='scatter' ? '📈 散點圖' : '📋 表格';
+  document.getElementById('chart').style.display = viewMode==='scatter' ? 'block' : 'none';
+  document.getElementById('tableView').style.display = viewMode==='table' ? 'block' : 'none';
+  if(viewMode==='table') renderTable();
+});
+
+const _origRender = render;
+render = function(){
+  _origRender();
+  if(viewMode==='table') renderTable();
+};
+
+render();
+
+// ---------- auto-load: 部署到網站上時，開啟頁面自動抓同目錄下的 xq_group_rrg.json ----------
+(async function autoFetchLatest(){
+  try{
+    const resp = await fetch('./xq_group_rrg.json', {cache:'no-store'});
+    if(!resp.ok) throw new Error('no json yet');
+    const json = await resp.json();
+    loadDataset(json);
+    subtitle.textContent += ' ・ 自動載入最新資料';
+  }catch(e){
+    // 還沒有資料（例如第一次部署、Actions還沒跑過），維持空狀態讓使用者手動上傳或按範例資料
+    console.log('尚未找到 xq_group_rrg.json，請手動上傳或稍後再試：', e.message);
+  }
+})();
+</script>
+</body>
+</html>
