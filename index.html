@@ -153,6 +153,7 @@
       <span class="datebox">尾巴長度</span>
       <input id="tailSlider" type="range" min="3" max="20" value="8">
       <span class="datebox" id="tailValue">8日</span>
+      <button id="tailFullBtn" title="顯示這個標的的完整歷史軌跡">拉到最長</button>
       <span class="datebox">篩選</span>
       <div id="filterBtns" class="btn-group">
         <button data-filter="all" class="active">全部</button>
@@ -250,6 +251,8 @@ function sectorVisible(name){
 }
 
 function renderPicker(){
+  const panelEl = document.getElementById('sectorPicker');
+  if(panelEl && !panelEl.classList.contains('open')) return; // don't waste work rebuilding a hidden panel
   const listEl = document.getElementById('pickerList');
   const countEl = document.getElementById('pickerCount');
   const selCountEl = document.getElementById('pickerSelectedCount');
@@ -339,15 +342,19 @@ function estimateLabelWidth(name){
   return w + 4;
 }
 
-// Simple pairwise vertical declutter: push overlapping label boxes apart along Y
-// until nothing overlaps (or pass limit reached). Keeps X anchored near the dot.
+// Simple declutter: sort by Y, only compare each label against its next few neighbors
+// (overlaps only ever happen between vertically-close labels), instead of comparing every pair.
+// This keeps the cost near O(n) instead of O(n^2), regardless of how many sectors are shown.
 function resolveLabelLayout(items){
   const n = items.length;
-  for(let pass=0; pass<25; pass++){
+  if(n < 2) return;
+  for(let pass=0; pass<8; pass++){
+    items.sort((a,b)=> a.ly - b.ly);
     let moved = false;
     for(let i=0;i<n;i++){
-      for(let j=i+1;j<n;j++){
-        const a=items[i], b=items[j];
+      const a = items[i];
+      for(let j=i+1; j<Math.min(n, i+6); j++){
+        const b = items[j];
         const ax1=a.lx-2, ax2=a.lx+a.w, ay1=a.ly-a.h, ay2=a.ly+3;
         const bx1=b.lx-2, bx2=b.lx+b.w, by1=b.ly-b.h, by2=b.ly+3;
         const overlapX = Math.min(ax2,bx2) - Math.max(ax1,bx1);
@@ -355,8 +362,7 @@ function resolveLabelLayout(items){
         if(overlapX>0 && overlapY>0){
           moved = true;
           const push = overlapY/2 + 0.6;
-          if(a.ly <= b.ly){ a.ly -= push; b.ly += push; }
-          else { a.ly += push; b.ly -= push; }
+          a.ly -= push; b.ly += push;
         }
       }
     }
@@ -550,6 +556,7 @@ function loadFlatVariant(json){
   });
   computeDomain();
   scrubber.max = json.dates.length - 1;
+  document.getElementById('tailSlider').max = json.dates.length;
   dateIndex = Math.min(dateIndex, json.dates.length - 1);
   if(dateIndex < 0) dateIndex = 0;
   const bLabel = benchmarkLabels[curBenchmark] ? `・基準:${benchmarkLabels[curBenchmark]}` : '';
@@ -614,6 +621,13 @@ document.getElementById('tailSlider').addEventListener('input', (e)=>{
   document.getElementById('tailValue').textContent = TRAIL_LEN + '日';
   render();
 });
+document.getElementById('tailFullBtn').addEventListener('click', ()=>{
+  const slider = document.getElementById('tailSlider');
+  TRAIL_LEN = dataset ? dataset.dates.length : parseInt(slider.max, 10);
+  slider.value = TRAIL_LEN;
+  document.getElementById('tailValue').textContent = TRAIL_LEN + '日';
+  render();
+});
 
 document.querySelectorAll('#filterBtns button').forEach(b=>{
   b.addEventListener('click', ()=>{
@@ -632,6 +646,7 @@ document.getElementById('searchBox').addEventListener('input', (e)=>{
 
 document.getElementById('pickerToggleBtn').addEventListener('click', ()=>{
   document.getElementById('sectorPicker').classList.toggle('open');
+  renderPicker();
 });
 document.getElementById('pickerSearch').addEventListener('input', (e)=>{
   pickerSearchText = e.target.value.trim();
