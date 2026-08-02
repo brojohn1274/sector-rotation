@@ -388,6 +388,7 @@ function smoothPathD(pts){
 }
 
 let staticG = null, dotsG = null, defsG = null, dotCache = {}, gradCounter = 0;
+let lastDomainKey = null, dateTextEl = null;
 
 function ensureLayers(){
   if(staticG && dotsG && svg.contains(staticG)) return;
@@ -407,6 +408,8 @@ function ensureLayers(){
   svg.appendChild(dotsG);
   dotCache = {};
   gradCounter = 0;
+  lastDomainKey = null;
+  dateTextEl = null;
 }
 
 function render(){
@@ -414,44 +417,53 @@ function render(){
   emptyState.style.display='none';
   ensureLayers();
 
-  // ---- static background (grid/axes/quadrant labels/date) — cheap to fully rebuild, no motion needed ----
-  staticG.innerHTML = '';
-  for(let gx = Math.ceil(domain.minR); gx <= Math.floor(domain.maxR); gx++){
-    staticG.appendChild(el('line',{x1:X(gx),y1:PAD-10,x2:X(gx),y2:H-PAD+10,class:'grid-line'}));
-  }
-  for(let gy = Math.ceil(domain.minM); gy <= Math.floor(domain.maxM); gy++){
-    staticG.appendChild(el('line',{x1:PAD-10,y1:Y(gy),x2:W-PAD+10,y2:Y(gy),class:'grid-line'}));
-  }
-  staticG.appendChild(el('line',{x1:X100(),y1:PAD-10,x2:X100(),y2:H-PAD+10,class:'axis-line'}));
-  staticG.appendChild(el('line',{x1:PAD-10,y1:Y100(),x2:W-PAD+10,y2:Y100(),class:'axis-line'}));
+  // ---- static background (grid/axes/quadrant labels) — only rebuild when domain actually changes ----
+  const domainKey = `${domain.minR.toFixed(3)}|${domain.maxR.toFixed(3)}|${domain.minM.toFixed(3)}|${domain.maxM.toFixed(3)}`;
+  if(domainKey !== lastDomainKey){
+    lastDomainKey = domainKey;
+    staticG.innerHTML = '';
+    for(let gx = Math.ceil(domain.minR); gx <= Math.floor(domain.maxR); gx++){
+      staticG.appendChild(el('line',{x1:X(gx),y1:PAD-10,x2:X(gx),y2:H-PAD+10,class:'grid-line'}));
+    }
+    for(let gy = Math.ceil(domain.minM); gy <= Math.floor(domain.maxM); gy++){
+      staticG.appendChild(el('line',{x1:PAD-10,y1:Y(gy),x2:W-PAD+10,y2:Y(gy),class:'grid-line'}));
+    }
+    staticG.appendChild(el('line',{x1:X100(),y1:PAD-10,x2:X100(),y2:H-PAD+10,class:'axis-line'}));
+    staticG.appendChild(el('line',{x1:PAD-10,y1:Y100(),x2:W-PAD+10,y2:Y100(),class:'axis-line'}));
 
-  const qnum = [
-    {x:(PAD+X100())/2, y:(PAD+Y100())/2, t:'2', color:COLORS.improving},
-    {x:(X100()+W-PAD)/2, y:(PAD+Y100())/2, t:'1', color:COLORS.leading},
-    {x:(PAD+X100())/2, y:(Y100()+H-PAD)/2, t:'3', color:COLORS.lagging},
-    {x:(X100()+W-PAD)/2, y:(Y100()+H-PAD)/2, t:'4', color:COLORS.weakening},
-  ];
-  qnum.forEach(q=>{
-    const t = el('text',{x:q.x,y:q.y,'text-anchor':'middle','dominant-baseline':'middle',
-      class:'quadrant-num', style:`font-size:120px; fill:${q.color}`});
-    t.textContent = q.t;
-    staticG.appendChild(t);
-  });
+    const qnum = [
+      {x:(PAD+X100())/2, y:(PAD+Y100())/2, t:'2', color:COLORS.improving},
+      {x:(X100()+W-PAD)/2, y:(PAD+Y100())/2, t:'1', color:COLORS.leading},
+      {x:(PAD+X100())/2, y:(Y100()+H-PAD)/2, t:'3', color:COLORS.lagging},
+      {x:(X100()+W-PAD)/2, y:(Y100()+H-PAD)/2, t:'4', color:COLORS.weakening},
+    ];
+    qnum.forEach(q=>{
+      const t = el('text',{x:q.x,y:q.y,'text-anchor':'middle','dominant-baseline':'middle',
+        class:'quadrant-num', style:`font-size:120px; fill:${q.color}`});
+      t.textContent = q.t;
+      staticG.appendChild(t);
+    });
 
-  function qlabel(x,y,anchor,en,zh,color){
-    const t1 = el('text',{x,y,'text-anchor':anchor, class:'quadrant-label', style:`fill:${color}`});
-    t1.textContent = en + '  ' + zh;
-    staticG.appendChild(t1);
+    function qlabel(x,y,anchor,en,zh,color){
+      const t1 = el('text',{x,y,'text-anchor':anchor, class:'quadrant-label', style:`fill:${color}`});
+      t1.textContent = en + '  ' + zh;
+      staticG.appendChild(t1);
+    }
+    qlabel(PAD, 26, 'start', 'IMPROVING', '改善', COLORS.improving);
+    qlabel(W-PAD, 26, 'end', 'LEADING', '領先', COLORS.leading);
+    qlabel(PAD, H-16, 'start', 'LAGGING', '落後', COLORS.lagging);
+    qlabel(W-PAD, H-16, 'end', 'WEAKENING', '轉弱', COLORS.weakening);
   }
-  qlabel(PAD, 26, 'start', 'IMPROVING', '改善', COLORS.improving);
-  qlabel(W-PAD, 26, 'end', 'LEADING', '領先', COLORS.leading);
-  qlabel(PAD, H-16, 'start', 'LAGGING', '落後', COLORS.lagging);
-  qlabel(W-PAD, H-16, 'end', 'WEAKENING', '轉弱', COLORS.weakening);
 
+  // ---- date text: changes every frame, so it's a persistent node updated in place (no rebuild) ----
+  if(!dateTextEl){
+    dateTextEl = el('text',{x:W/2, y:36, 'text-anchor':'middle', style:'font-size:22px;font-weight:700;fill:#eef2fb'});
+    staticG.appendChild(dateTextEl);
+  } else if(dateTextEl.parentNode !== staticG){
+    staticG.appendChild(dateTextEl);
+  }
   const curDate = dataset.dates[dateIndex] || '';
-  const dt = el('text',{x:W/2, y:36, 'text-anchor':'middle', style:'font-size:22px;font-weight:700;fill:#eef2fb'});
-  dt.textContent = curDate;
-  staticG.appendChild(dt);
+  dateTextEl.textContent = curDate;
 
   // ---- sectors: reuse persistent DOM nodes per sector so cx/cy/d transitions animate smoothly ----
   const names = Object.keys(sectorSeries);
@@ -724,8 +736,12 @@ document.querySelectorAll('.speed').forEach(b=>{
 });
 scrubber.addEventListener('input', ()=>{
   stopPlay();
+  document.documentElement.style.setProperty('--anim-dur', '0ms'); // instant while actively dragging
   dateIndex = parseInt(scrubber.value, 10);
   render();
+});
+scrubber.addEventListener('change', ()=>{
+  updateAnimDuration(); // restore normal easing once the drag ends
 });
 
 // ---------- demo data generator ----------
