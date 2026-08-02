@@ -42,6 +42,28 @@
   input[type=range]{ width:140px; accent-color: var(--accent); }
   .datebox{ font-size:12px; color:var(--text-dim); min-width:78px; text-align:center;}
   main{ flex:1; position:relative; padding:8px 14px 14px; }
+  #sectorPicker{
+    position:absolute; top:8px; left:14px; bottom:14px; width:260px;
+    background:var(--panel); border:1px solid var(--grid); border-radius:10px;
+    padding:10px; overflow-y:auto; z-index:30; display:none; box-shadow:0 8px 24px rgba(0,0,0,.4);
+  }
+  #sectorPicker.open{ display:block; }
+  #sectorPicker .picker-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; gap:6px; }
+  #sectorPicker input[type=text]{
+    width:100%; background:#0c111c; color:#eef2fb; border:1px solid var(--axis);
+    border-radius:6px; padding:6px 8px; margin-bottom:8px; font-size:13px;
+  }
+  #sectorPicker .picker-only{ display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text-dim); }
+  #sectorPicker .picker-clear{
+    background:none; border:1px solid var(--axis); color:var(--text-dim); border-radius:6px;
+    padding:3px 8px; font-size:12px; cursor:pointer;
+  }
+  .picker-item{ display:flex; align-items:center; gap:8px; padding:6px 4px; border-radius:6px; cursor:pointer; font-size:13px; }
+  .picker-item:hover{ background:#182036; }
+  .picker-item.checked{ background:#1c2b4a; }
+  .picker-dot{ width:8px;height:8px;border-radius:50%;flex:none; }
+  .picker-name{ flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .picker-val{ color:var(--text-dim); font-size:12px; flex:none; }
   svg{ width:100%; height:100%; display:block; }
   .quadrant-label{ font-size:13px; font-weight:700; letter-spacing:1px; }
   .quadrant-label .en{ fill:currentColor; opacity:.9;}
@@ -51,9 +73,11 @@
   .axis-line{ stroke:var(--axis); stroke-width:1; stroke-dasharray:3 3; }
   .trail{ fill:none; stroke-linecap:round; stroke-linejoin:round; }
   .node-label{ font-size:10.5px; fill:var(--text); paint-order:stroke; stroke:#0a0e16; stroke-width:3px; }
+  .leader-line{ stroke:var(--text-dim); stroke-width:0.7; opacity:0.5; }
   .node-label.hot{ font-weight:700; }
   .dot-outline{ fill:none; stroke:#0a0e16; stroke-width:1.5px; }
-  .rrg-dot, .rrg-dot-outline, .rrg-trail{ transition: cx .35s cubic-bezier(.4,0,.2,1), cy .35s cubic-bezier(.4,0,.2,1), d .35s cubic-bezier(.4,0,.2,1), opacity .35s; }
+  .rrg-dot, .rrg-dot-outline, .rrg-trail{ transition: cx var(--anim-dur,.35s) cubic-bezier(.4,0,.2,1), cy var(--anim-dur,.35s) cubic-bezier(.4,0,.2,1), d var(--anim-dur,.35s) cubic-bezier(.4,0,.2,1), opacity var(--anim-dur,.35s); }
+  .node-label{ transition: x var(--anim-dur,.35s) cubic-bezier(.4,0,.2,1), y var(--anim-dur,.35s) cubic-bezier(.4,0,.2,1), opacity var(--anim-dur,.35s); }
   .empty-state{
     position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
     flex-direction:column; gap:14px; color:var(--text-dim); text-align:center; padding:20px;
@@ -129,9 +153,27 @@
       <span class="datebox">尾巴長度</span>
       <input id="tailSlider" type="range" min="3" max="20" value="8">
       <span class="datebox" id="tailValue">8日</span>
+      <span class="datebox">篩選</span>
+      <div id="filterBtns" class="btn-group">
+        <button data-filter="all" class="active">全部</button>
+        <button data-filter="tech">只看科技供應鏈</button>
+      </div>
+      <input id="searchBox" type="text" placeholder="搜尋分類名稱..." style="background:var(--panel-bg,#11182b); color:#eef2fb; border:1px solid #2a3350; border-radius:6px; padding:4px 8px; width:150px;">
+      <button id="pickerToggleBtn">🗂 標的清單</button>
     </div>
   </header>
   <main>
+    <div id="sectorPicker">
+      <div class="picker-head">
+        <b style="font-size:13px;">標的清單 (<span id="pickerCount">0</span>)</b>
+        <button class="picker-clear" id="pickerClearBtn">清除</button>
+      </div>
+      <input type="text" id="pickerSearch" placeholder="搜尋產業名稱或代碼...">
+      <label class="picker-only">
+        <input type="checkbox" id="pickerOnlySelected"> 只看已選 (<span id="pickerSelectedCount">0</span>)
+      </label>
+      <div id="pickerList" style="margin-top:8px;"></div>
+    </div>
     <svg id="chart" viewBox="0 0 1000 700" preserveAspectRatio="xMidYMid meet"></svg>
     <div id="tableView" style="display:none; height:100%; overflow:auto;">
       <table id="rankTable">
@@ -193,6 +235,61 @@ let timer = null;
 let TRAIL_LEN = 8;
 let rawVariants = null, benchmarkLabels = {}, periodLabels = {}, curBenchmark = null, curPeriod = null;
 
+// ---------- filter state ----------
+const TECH_GROUPS = new Set(["AI伺服器_散熱", "AI伺服器_機殼機構", "AI伺服器_系統整合", "AI伺服器_電源供應", "CPO矽光子", "IC基板指標", "IC封測指標", "IC零組件通路商指標", "LCD驅動IC指標", "MCU指標", "MLCC指標", "PCB設備指標", "TFT面板指標", "USB_IC指標", "伺服器指標", "伺服器機殼指標", "先進封裝_CoWoS", "光固化材料指標", "光學鏡頭指標", "光纖產品指標", "其他電子通路指標", "分離式元件指標", "利基型記憶體IC指標", "半導體化學品指標", "半導體封測材料指標", "半導體設備指標", "印刷電路板上游與材料指標", "印刷電路板指標", "廠務工程指標", "散熱模組指標", "晶圓代工指標", "機械零組件指標", "玻纖布指標", "石英元件指標", "砷化鎵相關指標", "筆記型電腦指標", "網路通訊指標", "網通交換器", "被動元件指標", "記憶體模組指標", "記憶體製造指標", "設計IP指標", "證券指標", "車用電子指標", "軟板上游材料指標", "軟板指標", "軟體指標", "軸承滑軌指標", "連接器指標", "連接線材指標", "週邊產品指標", "遊戲相關指標", "銅箔基板指標", "電子代工指標", "電子驗證相關指標", "電池材料相關指標", "電源管理IC指標", "電腦板卡指標", "電腦通路指標", "面板設備指標"]);
+let filterMode = 'all'; // 'all' | 'tech'
+let searchText = '';
+let selectedSectors = new Set();
+let onlySelected = false;
+let pickerSearchText = '';
+function sectorVisible(name){
+  if(filterMode === 'tech' && !TECH_GROUPS.has(name)) return false;
+  if(searchText && !name.toLowerCase().includes(searchText.toLowerCase())) return false;
+  if(onlySelected && selectedSectors.size>0 && !selectedSectors.has(name)) return false;
+  return true;
+}
+
+function renderPicker(){
+  const listEl = document.getElementById('pickerList');
+  const countEl = document.getElementById('pickerCount');
+  const selCountEl = document.getElementById('pickerSelectedCount');
+  if(!listEl) return;
+  if(!dataset){ listEl.innerHTML=''; countEl.textContent='0'; selCountEl.textContent='0'; return; }
+  const curDate = dataset.dates[dateIndex];
+  const rows = Object.keys(sectorSeries)
+    .filter(name => !pickerSearchText || name.toLowerCase().includes(pickerSearchText.toLowerCase()))
+    .map(name=>{
+      const series = sectorSeries[name];
+      const p = series.get(curDate);
+      return {name, ratio: p ? p.ratio : null, momentum: p ? p.momentum : null};
+    })
+    .sort((a,b)=> (b.ratio||0) - (a.ratio||0));
+  countEl.textContent = rows.length;
+  selCountEl.textContent = selectedSectors.size;
+  listEl.innerHTML = rows.map(r=>{
+    const checked = selectedSectors.has(r.name);
+    const quad = r.ratio!=null ? quadrantOf(r.ratio, r.momentum) : null;
+    const color = quad ? COLORS[quad] : '#5c6788';
+    const val = r.ratio!=null ? r.ratio.toFixed(1) : '--';
+    return `<div class="picker-item${checked?' checked':''}" data-name="${r.name.replace(/"/g,'&quot;')}">
+      <span class="picker-dot" style="background:${color}"></span>
+      <span class="picker-name">${r.name}</span>
+      <span class="picker-val">${val}</span>
+      <input type="checkbox" ${checked?'checked':''} style="pointer-events:none;">
+    </div>`;
+  }).join('');
+  listEl.querySelectorAll('.picker-item').forEach(item=>{
+    item.addEventListener('click', ()=>{
+      const name = item.dataset.name;
+      if(selectedSectors.has(name)) selectedSectors.delete(name);
+      else selectedSectors.add(name);
+      renderPicker();
+      computeDomain();
+      render();
+    });
+  });
+}
+
 // ---------- coordinate mapping ----------
 const PAD = 70;
 const W = 1000, H = 700;
@@ -200,7 +297,8 @@ let domain = {minR:96, maxR:106, minM:96, maxM:106};
 
 function computeDomain(){
   let minR=Infinity,maxR=-Infinity,minM=Infinity,maxM=-Infinity;
-  Object.values(sectorSeries).forEach(map=>{
+  Object.entries(sectorSeries).forEach(([name,map])=>{
+    if(!sectorVisible(name)) return;
     map.forEach(p=>{
       if(p.ratio<minR)minR=p.ratio; if(p.ratio>maxR)maxR=p.ratio;
       if(p.momentum<minM)minM=p.momentum; if(p.momentum>maxM)maxM=p.momentum;
@@ -233,16 +331,76 @@ function el(tag, attrs){
   return e;
 }
 
-let staticG = null, dotsG = null, dotCache = {};
+function estimateLabelWidth(name){
+  let w = 0;
+  for(const ch of name){
+    w += /[\u4e00-\u9fff]/.test(ch) ? 11 : 7;
+  }
+  return w + 4;
+}
+
+// Simple pairwise vertical declutter: push overlapping label boxes apart along Y
+// until nothing overlaps (or pass limit reached). Keeps X anchored near the dot.
+function resolveLabelLayout(items){
+  const n = items.length;
+  for(let pass=0; pass<25; pass++){
+    let moved = false;
+    for(let i=0;i<n;i++){
+      for(let j=i+1;j<n;j++){
+        const a=items[i], b=items[j];
+        const ax1=a.lx-2, ax2=a.lx+a.w, ay1=a.ly-a.h, ay2=a.ly+3;
+        const bx1=b.lx-2, bx2=b.lx+b.w, by1=b.ly-b.h, by2=b.ly+3;
+        const overlapX = Math.min(ax2,bx2) - Math.max(ax1,bx1);
+        const overlapY = Math.min(ay2,by2) - Math.max(ay1,by1);
+        if(overlapX>0 && overlapY>0){
+          moved = true;
+          const push = overlapY/2 + 0.6;
+          if(a.ly <= b.ly){ a.ly -= push; b.ly += push; }
+          else { a.ly += push; b.ly -= push; }
+        }
+      }
+    }
+    if(!moved) break;
+  }
+}
+
+// Catmull-Rom -> cubic Bezier smoothing so trails read as flowing curves instead of hard-angled polylines
+function smoothPathD(pts){
+  if(pts.length < 2) return '';
+  if(pts.length === 2) return `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)} L${pts[1].x.toFixed(1)},${pts[1].y.toFixed(1)}`;
+  let d = `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)} `;
+  for(let i=0; i<pts.length-1; i++){
+    const p0 = pts[i-1] || pts[i];
+    const p1 = pts[i];
+    const p2 = pts[i+1];
+    const p3 = pts[i+2] || p2;
+    const c1x = p1.x + (p2.x - p0.x)/6, c1y = p1.y + (p2.y - p0.y)/6;
+    const c2x = p2.x - (p3.x - p1.x)/6, c2y = p2.y - (p3.y - p1.y)/6;
+    d += `C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${p2.x.toFixed(1)},${p2.y.toFixed(1)} `;
+  }
+  return d.trim();
+}
+
+let staticG = null, dotsG = null, defsG = null, dotCache = {}, gradCounter = 0;
 
 function ensureLayers(){
   if(staticG && dotsG && svg.contains(staticG)) return;
   svg.innerHTML = '';
+  defsG = el('defs', {});
+  const glow = el('filter', {id:'dotGlow', x:'-60%', y:'-60%', width:'220%', height:'220%'});
+  glow.appendChild(el('feGaussianBlur', {stdDeviation:'2.2', result:'blur'}));
+  const merge = el('feMerge', {});
+  merge.appendChild(el('feMergeNode', {in:'blur'}));
+  merge.appendChild(el('feMergeNode', {in:'SourceGraphic'}));
+  glow.appendChild(merge);
+  defsG.appendChild(glow);
   staticG = el('g', {id:'staticLayer'});
   dotsG = el('g', {id:'dotsLayer'});
+  svg.appendChild(defsG);
   svg.appendChild(staticG);
   svg.appendChild(dotsG);
   dotCache = {};
+  gradCounter = 0;
 }
 
 function render(){
@@ -292,7 +450,9 @@ function render(){
   // ---- sectors: reuse persistent DOM nodes per sector so cx/cy/d transitions animate smoothly ----
   const names = Object.keys(sectorSeries);
   const seen = new Set();
+  const layoutItems = [];
   names.forEach(name=>{
+    if(!sectorVisible(name)) return;
     const series = sectorSeries[name];
     const pts = [];
     for(let i=Math.max(0, dateIndex-TRAIL_LEN+1); i<=dateIndex; i++){
@@ -308,13 +468,22 @@ function render(){
 
     let entry = dotCache[name];
     if(!entry){
+      const gradId = 'trailgrad' + (gradCounter++);
+      const grad = el('linearGradient', {id:gradId, gradientUnits:'userSpaceOnUse'});
+      grad.appendChild(el('stop', {offset:'0%', 'stop-opacity':'0'}));
+      grad.appendChild(el('stop', {offset:'100%', 'stop-opacity':'0.85'}));
+      defsG.appendChild(grad);
       entry = {
-        trail: el('path',{class:'rrg-trail trail','stroke-width':2}),
+        gradId,
+        gradEl: grad,
+        trail: el('path',{class:'rrg-trail trail','stroke-width':2.2, fill:'none', stroke:`url(#${gradId})`}),
         outline: el('circle',{r:7.5, class:'dot-outline rrg-dot-outline'}),
-        circle: el('circle',{r:6, class:'rrg-dot'}),
+        circle: el('circle',{r:6, class:'rrg-dot', filter:'url(#dotGlow)'}),
         label: el('text',{class:'node-label'}),
+        leader: el('line',{class:'leader-line'}),
       };
       dotsG.appendChild(entry.trail);
+      dotsG.appendChild(entry.leader);
       dotsG.appendChild(entry.outline);
       dotsG.appendChild(entry.circle);
       dotsG.appendChild(entry.label);
@@ -323,31 +492,51 @@ function render(){
 
     let pathD = '';
     if(pts.length>1){
-      pts.forEach((p,i)=>{
-        const x=X(p.ratio), y=Y(p.momentum);
-        pathD += (i===0? 'M':'L') + x.toFixed(1) + ',' + y.toFixed(1) + ' ';
-      });
+      const coords = pts.map(p=>({x:X(p.ratio), y:Y(p.momentum)}));
+      pathD = smoothPathD(coords);
+      const first = coords[0], lastPt = coords[coords.length-1];
+      entry.gradEl.setAttribute('x1', first.x.toFixed(1)); entry.gradEl.setAttribute('y1', first.y.toFixed(1));
+      entry.gradEl.setAttribute('x2', lastPt.x.toFixed(1)); entry.gradEl.setAttribute('y2', lastPt.y.toFixed(1));
+      entry.gradEl.children[0].setAttribute('stop-color', color);
+      entry.gradEl.children[1].setAttribute('stop-color', color);
     }
     entry.trail.setAttribute('d', pathD.trim());
-    entry.trail.setAttribute('stroke', color);
-    entry.trail.setAttribute('opacity', pts.length>1 ? 0.55 : 0);
+    entry.trail.setAttribute('opacity', pts.length>1 ? 1 : 0);
     entry.outline.setAttribute('cx', cx); entry.outline.setAttribute('cy', cy);
     entry.circle.setAttribute('cx', cx); entry.circle.setAttribute('cy', cy);
     entry.circle.setAttribute('fill', color);
-    entry.label.setAttribute('x', cx+9); entry.label.setAttribute('y', cy+4);
-    entry.label.textContent = name;
     entry.trail.style.display = entry.outline.style.display = entry.circle.style.display = entry.label.style.display = '';
+
+    const w = estimateLabelWidth(name), h = 12;
+    layoutItems.push({name, entry, cx, cy, lx: cx+9, ly: cy+4, w, h, defaultLy: cy+4});
   });
+
+  resolveLabelLayout(layoutItems);
+  layoutItems.forEach(it=>{
+    it.entry.label.setAttribute('x', it.lx.toFixed(1));
+    it.entry.label.setAttribute('y', it.ly.toFixed(1));
+    it.entry.label.textContent = it.name;
+    const moved = Math.abs(it.ly - it.defaultLy) > 6;
+    if(moved){
+      it.entry.leader.setAttribute('x1', it.cx); it.entry.leader.setAttribute('y1', it.cy);
+      it.entry.leader.setAttribute('x2', (it.lx-2).toFixed(1)); it.entry.leader.setAttribute('y2', (it.ly-3).toFixed(1));
+      it.entry.leader.style.display = '';
+    } else {
+      it.entry.leader.style.display = 'none';
+    }
+  });
+
   // hide sectors that have no data at this date instead of destroying (keeps identity if they reappear)
   Object.keys(dotCache).forEach(name=>{
     if(!seen.has(name)){
       const e = dotCache[name];
-      e.trail.style.display = e.outline.style.display = e.circle.style.display = e.label.style.display = 'none';
+      e.trail.style.display = e.outline.style.display = e.circle.style.display = e.label.style.display = e.leader.style.display = 'none';
     }
   });
 
   scrubber.value = dateIndex;
   dateBox.textContent = curDate;
+  renderPicker();
 }
 
 // ---------- data loading ----------
@@ -426,6 +615,42 @@ document.getElementById('tailSlider').addEventListener('input', (e)=>{
   render();
 });
 
+document.querySelectorAll('#filterBtns button').forEach(b=>{
+  b.addEventListener('click', ()=>{
+    filterMode = b.dataset.filter;
+    document.querySelectorAll('#filterBtns button').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');
+    computeDomain();
+    render();
+  });
+});
+document.getElementById('searchBox').addEventListener('input', (e)=>{
+  searchText = e.target.value.trim();
+  computeDomain();
+  render();
+});
+
+document.getElementById('pickerToggleBtn').addEventListener('click', ()=>{
+  document.getElementById('sectorPicker').classList.toggle('open');
+});
+document.getElementById('pickerSearch').addEventListener('input', (e)=>{
+  pickerSearchText = e.target.value.trim();
+  renderPicker();
+});
+document.getElementById('pickerOnlySelected').addEventListener('change', (e)=>{
+  onlySelected = e.target.checked;
+  computeDomain();
+  render();
+});
+document.getElementById('pickerClearBtn').addEventListener('click', ()=>{
+  selectedSectors.clear();
+  onlySelected = false;
+  document.getElementById('pickerOnlySelected').checked = false;
+  renderPicker();
+  computeDomain();
+  render();
+});
+
 document.getElementById('fileInput').addEventListener('change', (e)=>{
   const file = e.target.files[0];
   if(!file) return;
@@ -466,11 +691,19 @@ playBtn.addEventListener('click', ()=>{
 document.getElementById('resetBtn').addEventListener('click', ()=>{
   stopPlay(); dateIndex = 0; render();
 });
+function updateAnimDuration(){
+  const interval = 500 / speed; // ms between steps at current speed
+  const dur = Math.min(350, interval * 0.7); // never let transition outlast the step
+  document.documentElement.style.setProperty('--anim-dur', dur + 'ms');
+}
+updateAnimDuration();
+
 document.querySelectorAll('.speed').forEach(b=>{
   b.addEventListener('click', ()=>{
     document.querySelectorAll('.speed').forEach(x=>x.classList.remove('active'));
     b.classList.add('active');
     speed = parseFloat(b.dataset.speed);
+    updateAnimDuration();
     if(playing){ stopPlay(); startPlay(); }
   });
 });
@@ -523,6 +756,7 @@ function buildTableRows(){
   const curDate = dataset.dates[dateIndex];
   const rows = [];
   Object.keys(sectorSeries).forEach(name=>{
+    if(!sectorVisible(name)) return;
     const series = sectorSeries[name];
     const cur = series.get(curDate);
     if(!cur) return;
