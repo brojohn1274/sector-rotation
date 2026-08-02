@@ -480,9 +480,18 @@ function render(){
     if(pts.length===0) return;
     seen.add(name);
     const last = pts[pts.length-1];
-    const quad = quadrantOf(last.ratio, last.momentum);
+    let dispRatio = last.ratio, dispMomentum = last.momentum;
+    if(playing && playFrac > 0){
+      const nextDate = dataset.dates[dateIndex+1];
+      const nextPt = nextDate ? series.get(nextDate) : null;
+      if(nextPt){
+        dispRatio = last.ratio + (nextPt.ratio - last.ratio) * playFrac;
+        dispMomentum = last.momentum + (nextPt.momentum - last.momentum) * playFrac;
+      }
+    }
+    const quad = quadrantOf(dispRatio, dispMomentum);
     const color = COLORS[quad];
-    const cx = X(last.ratio), cy = Y(last.momentum);
+    const cx = X(dispRatio), cy = Y(dispMomentum);
 
     let entry = dotCache[name];
     if(!entry){
@@ -509,8 +518,9 @@ function render(){
     }
 
     let pathD = '';
-    if(pts.length>1){
+    if(pts.length>1 || (pts.length===1 && (dispRatio!==last.ratio || dispMomentum!==last.momentum))){
       const coords = pts.map(p=>({x:X(p.ratio), y:Y(p.momentum)}));
+      if(dispRatio!==last.ratio || dispMomentum!==last.momentum) coords.push({x:cx, y:cy});
       pathD = smoothPathD(coords);
       const first = coords[0], lastPt = coords[coords.length-1];
       entry.gradEl.setAttribute('x1', first.x.toFixed(1)); entry.gradEl.setAttribute('y1', first.y.toFixed(1));
@@ -698,18 +708,36 @@ document.getElementById('demoBtn').addEventListener('click', ()=>{
 });
 
 // ---------- playback ----------
+// Instead of jumping day-to-day and letting CSS ease-out fully decelerate at each stop
+// (which reads as "跳格"/choppy no matter how smooth the easing curve is), we drive a
+// continuous sub-day progress value (playFrac) every animation frame and interpolate the
+// live position between the current day's point and the next day's point. Motion is
+// computed exactly per frame instead of relying on CSS transitions to "catch up".
+let playFrac = 0, playRAF = null, playLastTime = null;
 function stopPlay(){
   playing = false; playBtn.textContent = '▶ 播放';
-  if(timer){ clearInterval(timer); timer=null; }
+  if(playRAF){ cancelAnimationFrame(playRAF); playRAF=null; }
+  playFrac = 0;
+  updateAnimDuration();
 }
 function startPlay(){
   if(!dataset) return;
   playing = true; playBtn.textContent = '⏸ 暫停';
-  timer = setInterval(()=>{
-    dateIndex++;
-    if(dateIndex >= dataset.dates.length){ dateIndex = dataset.dates.length-1; stopPlay(); }
+  document.documentElement.style.setProperty('--anim-dur', '0ms'); // JS now drives motion every frame; CSS transition would fight it
+  playLastTime = performance.now();
+  function step(now){
+    if(!playing) return;
+    const dt = now - playLastTime; playLastTime = now;
+    playFrac += dt * (speed/500); // matches the old "1 day per 500/speed ms" pacing
+    while(playFrac >= 1){
+      playFrac -= 1;
+      dateIndex++;
+      if(dateIndex >= dataset.dates.length-1){ dateIndex = dataset.dates.length-1; playFrac=0; stopPlay(); render(); return; }
+    }
     render();
-  }, 500/speed);
+    playRAF = requestAnimationFrame(step);
+  }
+  playRAF = requestAnimationFrame(step);
 }
 playBtn.addEventListener('click', ()=>{
   if(!dataset) return;
